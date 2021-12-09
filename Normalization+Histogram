@@ -1,0 +1,50 @@
+!pip install tensorflow-io
+!pip install pydicom
+!pip install pydicom-seg
+!pip3 install opencv-python
+!pip3 install opencv-contrib-python
+
+import numpy as np
+import pydicom as dicom
+import matplotlib.pylab as plt
+import tensorflow as tf
+import pydicom
+import cv2
+
+filename = '/content/sample_data/test.dcm'
+img_cv=cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
+type(img_cv)
+dcm=pydicom.dcmread(filename)
+img_dcm=dcm.pixel_array
+
+#Manual Nor
+img_f=img_dcm.astype(np.float32)
+
+nor=((img_f-np.min(img_f))*255)/(np.max(img_f)-np.min(img_f)
+nor_img=nor.astype(np.uint8)
+
+#OPEN CV API를 통해 정규화
+nor_img2=cv2.normalize(img_dcm, None, 0, 255, cv2.NORM_MINMAX)
+
+print(np.max(img_f), np.min(img_f), np.max(nor_img), np.min(nor_img), np.size(nor_img)) 
+
+#plt.imshow(img_dcm, cmap=plt.cm.gray)
+#plt.imshow(nor_img, cmap=plt.cm.gray)
+#plt.imshow(img_cv) 
+
+#히스토그램
+hist=cv2.calcHist([img_dcm], [0], None, [256], [0,255])
+hist_norm=cv2.calcHist([nor_img], [0], None, [256], [0,255])
+hist_norm2=cv2.calcHist([nor_img2], [0], None, [256], [0,255])
+
+#cv2.imshow('Before', img_cv)
+#cv2.imshow('Manual', nor_img)
+#cv2.imshow('cv.normalize()', nor_img2)
+
+hists={'before': hist, 'Manual': hist_norm, 'cv.nor': hist_norm2}
+
+for i, (key, value) in enumerate (hists.items()):
+  plt.subplot(1,3,i+1)
+  plt.title(key)
+  plt.plot(value)
+plt.show()
