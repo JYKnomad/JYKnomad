@@ -1,0 +1,49 @@
+!pip install pydicom
+
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import pydicom as dcm
+import copy
+
+img_dcm=dcm.dcmread('/content/sample_data/test.dcm')  
+img=img_dcm.pixel_array
+
+print(type(img))
+print(img.dtype)
+plt.imshow(img)
+plt.show()
+
+int_img=cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
+dis_img = np.array(int_img, dtype='uint8')
+
+src = copy.copy(dis_img)
+src2 = copy.copy(dis_img)
+
+#gray 스케일로 변환
+
+#threshold로 binary image 만듦
+ret, imthres = cv2.threshold(src, 50, 255, cv2.THRESH_BINARY)
+
+#가장 바깥쪽 컨투어에 대해 모든 좌표 반환
+contour, hierarchy = cv2.findContours(imthres, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+#가장 바깥쪽 컨투어에 대해 꼭짓점 좌표만 반환
+contour2, hierarchy = cv2.findContours(imthres, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+#각 컨투어 개수 출력
+print('도형의 개수: %d(%d)' %(len(contour),len(contour2))) 
+
+#컨투어의 모든 좌표를 작은 파란색 점으로 표시
+for i in contour:
+  for j in i:
+    cv2.circle(src,tuple(j[0]), 1, (0,0,255),-1)
+
+#컨투어의 꼭짓점 좌표를 작은 파란색 점으로 표시
+for i in contour:
+  for j in i:
+    cv2.circle(src2,tuple(j[0]), 1, (0,0,255),-1) 
+
+#결과출력
+plt.imshow(src)
+plt.imshow(src2)
