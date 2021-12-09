@@ -1,0 +1,27 @@
+import cv2
+import numpy as np
+import pydicom as dcm
+
+filename = '/content/sample_data/test.dcm'
+img_cv=cv2.imread(filename, cv2.IMREAD_GRAYSCALE) 
+
+dcm=pydicom.dcmread(filename)
+img_dcm=dcm.pixel_array
+img_dcm_multiple=img_dcm*100
+
+#cv2 code nor.
+img_nor=cv2.normalize(img_dcm, None, 0, 255, cv2.NORM_MINMAX)
+
+plt.imshow(img_nor, cmap=plt.cm.gray)
+
+#미분커널생성
+gx_kernel=np.array([[-1,1]])
+gy_kernel=np.array([[-1,1]])
+
+#필터적용
+edge_gx=cv2.filter2D(img_dcm_multiple, -1, gx_kernel)
+edge_gy=cv2.filter2D(img_dcm_multiple, -1, gy_kernel)
+
+#결과 출력
+merge=np.hstack((img_dcm_multiple, edge_gx, edge_gy))
+plt.imshow(merge)
