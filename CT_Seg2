@@ -1,0 +1,148 @@
+!pip install pydicom
+!pip install opencv-python
+
+import pydicom
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+import cv2
+import copy
+
+# Alignment of file list
+# File list maninpulation
+
+def file_list():
+    LIST_FileNames = os.listdir('/content/dcm')
+    TEMP_LIST = []
+    for elem in LIST_FileNames:
+        if elem[-3:] == 'dcm':
+            TEMP_LIST.append(elem)
+        else:
+            pass
+    return TEMP_LIST 
+
+# Image Manupulating Functions
+
+def img_nor(src_img):
+    MAX_VAL = np.max(src_img)
+    MIN_VAL = np.min(src_img)
+    DIV_UP = src_img - MIN_VAL
+    DIV_DN = MAX_VAL - MIN_VAL
+    normalized_img = DIV_UP / DIV_DN
+    scaled_img = normalized_img * 255
+    ret_img = np.array(scaled_img, dtype='uint8')
+    return ret_img
+
+
+def gray_to_color(src_img_gray):
+    template_arr = np.zeros((512,512,3),dtype='uint8')
+    for height in range(512):
+        for width in range(512):
+            for ch in range(3):
+                template_arr[height][width][ch] = src_img_gray[height][width]
+    return template_arr
+
+def contour_view(pixel_arr, thr_1=15, thr_2=100):
+    out_img = img_nor(pixel_arr)
+    dst_img = cv2.GaussianBlur(out_img, ksize=(7,7), sigmaX=10.0)
+    edge = cv2.Canny(dst_img, thr_1, thr_2)
+    src = copy.copy(out_img)
+    contours, hierarchy = cv2.findContours(edge, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    tmp_list = []
+    for i in range(len(contours)):
+        if cv2.contourArea(contours[i]) > 500:
+            tmp_list.append(i)
+        else:
+            pass
+    for i in tmp_list:
+        cv2.drawContours(src, contours[i], -1, (255, 0, 0), 3)
+    return src
+
+def contour_view_without_edge(pixel_arr, thr_1=20, thr_2=110):
+    out_img = img_nor(pixel_arr)
+    dst_img = cv2.GaussianBlur(out_img, ksize=(7,7), sigmaX=10.0)
+    src = copy.copy(out_img)
+    contours, hierarchy = cv2.findContours(dst_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    tmp_list = []
+    for i in range(len(contours)):
+        if cv2.contourArea(contours[i]) > 500:
+            tmp_list.append(i)
+        else:
+            pass
+    for i in tmp_list:
+        cv2.drawContours(src, contours[i], -1, (255, 0, 0), 3)
+    return src
+
+def img_play(input_list):
+    for obj_frame in input_list:
+        FILE_OBJ = pydicom.dcmread(obj_frame)
+        PIXEL_ARR = FILE_OBJ.pixel_array
+        tmp_ret_img = contour_view(PIXEL_ARR)
+        ret_img = gray_to_color(tmp_ret_img)
+        plt.imshow(ret_img)
+        plt.show()
+
+def video_play(input_list):
+    frame_size = (512, 512)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    tmp_out = cv2.VideoWriter('./record1.mp4', fourcc, 20.0, frame_size, isColor=True)
+    for obj_frame in input_list:
+        FILE_OBJ = pydicom.dcmread('/content/dcm/'+obj_frame)
+        PIXEL_ARR = FILE_OBJ.pixel_array
+        # tmp_ret_img = contour_view(PIXEL_ARR)
+        tmp_ret_img = contour_view(PIXEL_ARR)
+        ret_img = gray_to_color(tmp_ret_img)
+        tmp_out.write(ret_img)
+
+def video_play_from_list(input_list):
+    frame_size = (512, 512)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    tmp_out = cv2.VideoWriter('./record2.mp4', fourcc, 4, frame_size, isColor=False)
+    for obj_frame in input_list:
+        tmp_out.write(obj_frame)
+
+
+#추가 코드... I Don't know
+
+f_obj = pydicom.dcmread('/content/dcm/1-02.dcm')
+arr_obj = f_obj.pixel_array
+tmp_list = []
+for i in range(60, 255, 5):
+  temporary2_frame = contour_view(arr_obj,20, i)
+  temporary_frame = cv2.putText(temporary2_frame, '%s'%i, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+  tmp_list.append(temporary_frame)
+video_play_from_list(tmp_list)
+
+
+f_obj = pydicom.dcmread('/content/dcm/1-02.dcm')
+arr_obj = f_obj.pixel_array
+img_arr = img_nor(arr_obj)
+out_img = copy.copy(img_arr)
+tmp_list = []
+dst_img = cv2.GaussianBlur(out_img, ksize=(11, 11), sigmaX=20.0)
+edge = cv2.Canny(dst_img, 30, 100)
+src = copy.copy(out_img)
+
+contours, hierarchy = cv2.findContours(edge, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+#print(len(contours))
+#print(contours)
+for i in contours:
+  cv2.drawContours(src, i, -1, (255, 0, 0), 3)
+
+cnt, hierarchy = cv2.findContours(src, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+print(len(cnt))
+temp_list = []
+for i in range(len(cnt)):
+  if cv2.contourArea(cnt[i]) > 500:
+    print(cv2.contourArea(cnt[i]))
+    print(i)
+    temp_list.append(i)
+  else:
+    pass
+print(temp_list)
+print(cv2.contourArea(cnt[0]))
+# for i in temp_list:
+#   cv2.drawContours(src, i, -1, (255, 0, 0), 3)
+
+# plt.imshow(src)
+# plt.show()
