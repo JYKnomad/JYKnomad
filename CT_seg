@@ -1,0 +1,140 @@
+import pydicom
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+import cv2
+import copy
+
+# Alignment of file list
+
+
+# File list maninpulation
+
+def file_list():
+    LIST_FileNames = os.listdir()
+    TEMP_LIST = []
+    for elem in LIST_FileNames:
+        if elem[-3:] == 'dcm':
+            TEMP_LIST.append(elem)
+        else:
+            pass
+    return TEMP_LIST
+
+# Image Manupulating Functions
+
+def img_nor(src_img):
+    '''
+    src : dicom pixel array
+    return : float array [0-1]
+    requried package: numpy
+    '''
+    MAX_VAL = np.max(src_img)
+    MIN_VAL = np.min(src_img)
+    DIV_UP = src_img - MIN_VAL
+    DIV_DN = MAX_VAL - MIN_VAL
+    normalized_img = DIV_UP / DIV_DN
+    scaled_img = normalized_img * 255
+    ret_img = np.array(scaled_img, dtype='uint8')
+    return ret_img
+
+def gray_to_color(src_img_gray):
+    '''
+    src: 1 channel image
+    return: 3 channel image(gray color)
+    '''
+    template_arr = np.zeros((512,512,3),dtype='uint8')
+    for height in range(512):
+        for width in range(512):
+            for ch in range(3):
+                template_arr[height][width][ch] = src_img_gray[height][width]
+    return template_arr
+
+def contour_view(pixel_arr, thr_1=20, thr_2=180):
+    '''
+    src: pixel_array
+    return: image_array_gray
+    '''
+    out_img = img_nor(pixel_arr)
+    dst_img = cv2.GaussianBlur(out_img, ksize=(5,5), sigmaX=10.0)
+    edge = cv2.Canny(dst_img, thr_1, thr_2)
+    src = copy.copy(out_img)
+    contours, hierarchy = cv2.findContours(edge, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    tmp_list = []
+    for i in range(len(contours)):
+        if cv2.contourArea(contours[i]) > 500:
+            tmp_list.append(i)
+        else:
+            pass
+    for i in tmp_list:
+        cv2.drawContours(src, contours[i], -1, (255, 0, 0), 3)
+    return src
+
+def contour_view_without_edge(pixel_arr, thr_1=20, thr_2=180):
+    '''
+    src: pixel_array
+    return: image_array_gray
+    '''
+    out_img = img_nor(pixel_arr)
+    dst_img = cv2.GaussianBlur(out_img, ksize=(5,5), sigmaX=10.0)
+    src = copy.copy(out_img)
+    contours, hierarchy = cv2.findContours(dst_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    tmp_list = []
+    for i in range(len(contours)):
+        if cv2.contourArea(contours[i]) > 500:
+            tmp_list.append(i)
+        else:
+            pass
+    for i in tmp_list:
+        cv2.drawContours(src, contours[i], -1, (255, 0, 0), 3)
+    return src
+
+def img_play(input_list):
+    for obj_frame in input_list:
+        FILE_OBJ = pydicom.dcmread(obj_frame)
+        PIXEL_ARR = FILE_OBJ.pixel_array
+        tmp_ret_img = contour_view(PIXEL_ARR)
+        ret_img = gray_to_color(tmp_ret_img)
+        plt.imshow(ret_img)
+        plt.show()
+
+def video_play(input_list):
+    '''
+    src: filename list
+    return: video-play
+    '''
+    frame_size = (512, 512)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    tmp_out = cv2.VideoWriter('./record1.mp4', fourcc, 20.0, frame_size, isColor=True)
+    for obj_frame in input_list:
+        FILE_OBJ = pydicom.dcmread(obj_frame)
+        PIXEL_ARR = FILE_OBJ.pixel_array
+        # tmp_ret_img = contour_view(PIXEL_ARR)
+        tmp_ret_img = contour_view(PIXEL_ARR)
+        ret_img = gray_to_color(tmp_ret_img)
+        tmp_out.write(ret_img)
+
+def video_play_from_list(input_list):
+    frame_size = (512, 512)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    tmp_out = cv2.VideoWriter('./record1.mp4', fourcc, 20.0, frame_size, isColor=True)
+    for obj_frame in input_list:
+        tmp_out.write(obj_frame)
+
+if __name__=='__main__':
+    TEMP_LIST = file_list()
+    video_play(TEMP_LIST)
+    # img_play(TEMP_LIST)
+# if __name__=='__main__':
+
+#     FILE_NAME = '1-112.dcm'
+#     F_OBJ = pydicom.dcmread(FILE_NAME)
+#     PIXEL_ARR = F_OBJ.pixel_array
+#     IMAGE_ARR = img_nor(PIXEL_ARR)
+#     THR_LIST = range(10,150,5)
+#     OUT_IMG_LIST = []
+#     for i in THR_LIST:
+#         src_img = contour_thrsh(IMAGE_ARR, i, i+20)
+#         color_img = gray_to_color(src_img)
+#         cv2.putText(color_img, '%s'%i, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+#         OUT_IMG_LIST.append(color_img)
+#     video_play_from_list(OUT_IMG_LIST)
