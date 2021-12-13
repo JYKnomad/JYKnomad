@@ -10,7 +10,6 @@ import copy
 
 # Alignment of file list
 # File list maninpulation
-
 def file_list():
     LIST_FileNames = os.listdir('/content/dcm')
     TEMP_LIST = []
@@ -42,15 +41,15 @@ def gray_to_color(src_img_gray):
                 template_arr[height][width][ch] = src_img_gray[height][width]
     return template_arr
 
-def contour_view(pixel_arr, thr_1=15, thr_2=100):
+def contour_view(pixel_arr, thr_1=1, thr_2=15):
     out_img = img_nor(pixel_arr)
-    dst_img = cv2.GaussianBlur(out_img, ksize=(7,7), sigmaX=10.0)
+    dst_img = cv2.GaussianBlur(out_img, ksize=(5,5), sigmaX=10.0)
     edge = cv2.Canny(dst_img, thr_1, thr_2)
     src = copy.copy(out_img)
     contours, hierarchy = cv2.findContours(edge, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     tmp_list = []
     for i in range(len(contours)):
-        if cv2.contourArea(contours[i]) > 500:
+        if cv2.contourArea(contours[i]) > 80:
             tmp_list.append(i)
         else:
             pass
@@ -58,14 +57,14 @@ def contour_view(pixel_arr, thr_1=15, thr_2=100):
         cv2.drawContours(src, contours[i], -1, (255, 0, 0), 3)
     return src
 
-def contour_view_without_edge(pixel_arr, thr_1=20, thr_2=110):
+def contour_view_without_edge(pixel_arr, thr_1=1, thr_2=15):
     out_img = img_nor(pixel_arr)
-    dst_img = cv2.GaussianBlur(out_img, ksize=(7,7), sigmaX=10.0)
+    dst_img = cv2.GaussianBlur(out_img, ksize=(5,5), sigmaX=10.0)
     src = copy.copy(out_img)
     contours, hierarchy = cv2.findContours(dst_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     tmp_list = []
     for i in range(len(contours)):
-        if cv2.contourArea(contours[i]) > 500:
+        if cv2.contourArea(contours[i]) > 80:
             tmp_list.append(i)
         else:
             pass
