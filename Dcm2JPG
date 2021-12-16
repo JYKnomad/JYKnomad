@@ -8,11 +8,18 @@ import pydicom as dicom
 from matplotlib import pyplot as plt
 from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
  
+import glob
+import numpy as np
+import cv2, pydicom
+import pydicom as dicom
+from matplotlib import pyplot as plt
+from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
+ 
 
  
-for files in glob.glob("/content/Untitled Folder/*.dcm"):
+for files in glob.glob("/content/dcm/*.dcm"):
     
-    window_center = -1500
+    window_center = 2000
     window_width = 1600
 
     slice = dicom.read_file(files) 
@@ -27,4 +34,4 @@ for files in glob.glob("/content/Untitled Folder/*.dcm"):
     image2 = apply_voi_lut(image, slice)
     # normalization
     image3 = np.clip(image, window_center - (window_width / 2), window_center + (window_width / 2))   
-    plt.imsave(files[0:len(image3) - 4] + ".jpg",d.pixel_array, cmap=plt.cm.bone)
+    plt.imsave(files[0:len(image3) - 4] + ".jpg", slice.pixel_array, cmap=plt.cm.bone)
