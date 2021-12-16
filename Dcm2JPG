@@ -1,0 +1,30 @@
+!pip install pydicom
+!pip install opencv-python
+
+import glob
+import numpy as np
+import cv2, pydicom
+import pydicom as dicom
+from matplotlib import pyplot as plt
+from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
+ 
+
+ 
+for files in glob.glob("/content/Untitled Folder/*.dcm"):
+    
+    window_center = -1500
+    window_width = 1600
+
+    slice = dicom.read_file(files) 
+    
+    s = int(slice.RescaleSlope)
+    b = int(slice.RescaleIntercept)
+    image = s * slice.pixel_array + b
+
+    slice.WindowCenter = window_center
+    slice.WindowWidth = window_width
+    image = apply_modality_lut(image, slice)
+    image2 = apply_voi_lut(image, slice)
+    # normalization
+    image3 = np.clip(image, window_center - (window_width / 2), window_center + (window_width / 2))   
+    plt.imsave(files[0:len(image3) - 4] + ".jpg",d.pixel_array, cmap=plt.cm.bone)
