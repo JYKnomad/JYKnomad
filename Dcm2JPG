@@ -1,9 +1,5 @@
-import glob
-import numpy as np
-import cv2, pydicom
-import pydicom as dicom
-from matplotlib import pyplot as plt
-from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
+!pip install pydicom
+!pip install ovencv-python
  
 import glob
 import numpy as np
@@ -14,7 +10,7 @@ from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
  
 
  
-for files in glob.glob("/content/dcm/*.dcm"):
+for files in glob.glob("/content/a/*.dcm"):
     
     window_center = -1000
     window_width = 1600
@@ -29,6 +25,7 @@ for files in glob.glob("/content/dcm/*.dcm"):
     slice.WindowWidth = window_width
     image = apply_modality_lut(image, slice)
     image2 = apply_voi_lut(image, slice)
+
     # normalization
     image3 = np.clip(image, window_center - (window_width / 2), window_center + (window_width / 2))   
-    plt.imsave(files[0:len(image3) - 4] + ".jpg", slice.pixel_array, cmap = 'gray')
+    plt.imsave(files[0:len(image3) ] + ".jpg", image3, cmap = 'gray')  
