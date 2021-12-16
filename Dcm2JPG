@@ -28,4 +28,5 @@ for files in glob.glob("/content/a/*.dcm"):
 
     # normalization
     image3 = np.clip(image, window_center - (window_width / 2), window_center + (window_width / 2))   
-    plt.imsave(files[0:len(image3) -4 ] + ".jpg", image3, cmap = 'gray')  
+    plt.imsave(files[:-3] + "jpg", image3, cmap = 'gray') 
+
