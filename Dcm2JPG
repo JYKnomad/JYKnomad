@@ -10,7 +10,7 @@ from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
  
 
  
-for files in glob.glob("/content/a/*.dcm"):
+for files in glob.glob("/content/dcm/*.dcm"):
     
     window_center = -1000
     window_width = 1600
