@@ -1,0 +1,491 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Jan 16 15:26:35 2017
+
+@author: biomax
+"""
+
+import numpy as np
+import glob, os
+import nibabel as nib
+import math
+import pandas as pd
+from pandas import DataFrame
+from scipy.ndimage import zoom, interpolation
+import matplotlib.pyplot as plt
+os.environ['KERAS_BACKEND'] = 'tensorflow'
+
+from keras.utils import np_utils
+from keras.models import Sequential
+from keras.layers.core import Dense, Activation, Dropout, Flatten
+from keras.layers import Conv3D, MaxPooling3D, ZeroPadding3D
+from keras.optimizers import SGD, RMSprop, Adam
+from keras import backend as K
+
+K.set_image_data_format='channels_last'
+from sklearn.cross_validation import train_test_split
+from sklearn import preprocessing
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import cohen_kappa_score 
+from sklearn.metrics import mean_absolute_error
+from scipy import stats, polyval
+from scipy.stats import pearsonr
+
+def imreslice(subj_array, origzoom, targetzoom):
+    zoomval = [origzoom[0]/targetzoom[0], origzoom[1]/targetzoom[1], origzoom[2]/targetzoom[2]]
+    output_array= zoom(subj_array, zoomval)
+    return output_array
+
+def shape_matching(im, size):
+    sz=im.shape
+    if sz[0] >size[0]:
+        xstart=int(math.ceil(sz[0]/2)- int(size[0]/2-1))
+        im=im[xstart-1:xstart+size[0]-1,:,:]
+    else:
+        npad1=int(math.floor(float(size[0])/2-float(sz[0])/2))
+        npad2=int(math.ceil(float(size[0])/2-float(sz[0])/2))
+        im=np.lib.pad(im,((npad1,npad2),
+                          (0,0),(0,0)),'constant')
+    if sz[1] >size[1]:
+        ystart=int(math.ceil(sz[1]/2)- int(size[1]/2-1))
+        im=im[:,ystart-1:ystart+size[1]-1,:]
+    else:
+        npad1=int(math.floor(float(size[1])/2-float(sz[1])/2))
+        npad2=int(math.ceil(float(size[1])/2-float(sz[1])/2))
+        im=np.lib.pad(im,((0,0), (npad1,npad2),
+                          (0,0)),'constant')
+    if sz[2] >size[2]:
+        zstart=int(math.ceil(sz[2]/2)- int(size[2]/2-1))
+        im=im[:,:,zstart-1:zstart+size[2]-1]
+    else:
+        npad1=int(math.floor(float(size[2])/2-float(sz[2])/2))
+        npad2=int(math.ceil(float(size[2])/2-float(sz[2])/2))
+        im=np.lib.pad(im,((0,0),(0,0),
+                          (npad1,npad2)),'constant')
+    return im  
+
+def get_dataset(lst_pids,dbfolder, targetshape = (80,80,60) ):
+    imdb=[]
+    for i,pid in enumerate(lst_pids):
+        nibfiles= glob.glob(dbfolder+ 'ADNI*'+pid+'*.nii')
+        nn=nib.load(nibfiles[0])
+        #nibaffine=nib.affine
+        nibsize=nn.header.get_zooms()
+        nibimg=nn.get_data()
+        nibimg=np.squeeze(nibimg)
+        newimg=imreslice (nibimg,nibsize[:3], (3.,3.,3.))
+        
+        #size to targetshape
+        im = shape_matching(newimg, targetshape)
+       
+        #Normalize by max-min
+        im_=(im+np.min(im))/(np.max(im)-np.min(im))
+        imdb.append(im_) 
+        print ("Preprocessing: Image parsing done for %d \n"%i)
+    return imdb
+    
+def augmentation_randomly_rotate(arr,angle=15, shiftrange=3, iter_num=1):
+    X_new =[]
+    for i in range(iter_num):
+        iangle = angle*np.random.rand(3)
+        shift = np.random.randint(-shiftrange,shiftrange, size=3)
+        shift = [0]+[nn for nn in shift] +[0]
+        X_ = interpolation.rotate(arr,iangle[0],axes=(1,2),reshape=False)
+        X_ = interpolation.rotate(X_,iangle[1],axes=(2,3),reshape=False)
+        X_ = interpolation.rotate(X_,iangle[2],axes=(1,3),reshape=False)
+        X_= interpolation.shift(X_,shift )
+        X_new.append(X_)
+
+    X_new = np.concatenate(X_new, axis=0)
+    return X_new
+
+
+def get_FBB_dataset(lst_rids,dbfolder_FBB, targetshape = (80,80,60) ):
+    imdb_FBB=[]
+    for i,rid in enumerate(lst_rids):
+        nibfiles= glob.glob(dbfolder_FBB+ 'ADNI*'+'*_S_'+rid+'*.nii')
+        #print(len(nibfiles))
+        nn=nib.load(nibfiles[0])
+        #nibaffine=nib.affine
+        nibsize=nn.header.get_zooms()
+        nibimg=nn.get_data()
+        nibimg=np.squeeze(nibimg)
+        newimg=imreslice (nibimg,nibsize[:3], (3.,3.,3.))
+        
+        #size to targetshape
+        im = shape_matching(newimg, targetshape)
+       
+        #Normalize by max-min
+        im_=(im+np.min(im))/(np.max(im)-np.min(im))
+        imdb_FBB.append(im_) 
+        print ("Preprocessing: Image parsing done for %d \n"%i)
+    return imdb_FBB     
+
+targetshape = (80,80,60)
+#Train Set
+df_train=pd.read_csv('../CSV_TrainSet_190417.csv')
+dbfolder = '../imagedb/'
+lst_train=list(df_train.PTID)
+targetSUV= np.asarray(df_train.loc[:,['FRONTAL','CINGULATE','PARIETAL','TEMPORAL']], dtype='float32') \
+            /np.transpose(np.tile(np.asarray(df_train.loc[:,'WHOLECEREBELLUM'], dtype='float32'), (4,1)))
+#targetSUV= np.asarray(df_train.SUMMARYSUVR_WHOLECEREBNORM, dtype="float32")
+DX_bl_target= np.asarray(df_train.loc[:,['DX_bl']], dtype='str') 
+imdb = get_dataset(lst_train, dbfolder)
+imarr=np.asarray(imdb)  
+imarr= np.expand_dims(imarr, axis=-1)
+
+#Test Set
+df_test=pd.read_csv('../CSV_TestSet_190424.csv')
+lst_test=list(df_test.PTID)
+testSUV= np.asarray(df_test.loc[:,['FRONTAL','CINGULATE','PARIETAL','TEMPORAL']], dtype='float32') \
+            /np.transpose(np.tile(np.asarray(df_test.loc[:,'WHOLECEREBELLUM'], dtype='float32'), (4,1)))
+#testSUV= np.asarray(df_test.SUMMARYSUVR_COMPOSITE_REFNORM, dtype="float32")
+DX_bl_test= np.asarray(df_test.loc[:,['DX_bl']], dtype='str') 
+dbfolder_test = '../imagedb_Test/'
+imdb_test = get_dataset(lst_test,dbfolder_test)
+imarr_test = np.asarray(imdb_test)
+imarr_test = np.expand_dims(imarr_test, axis=-1)
+
+#FBB Set
+df_FBB=pd.read_csv('../FBB/UCBERKELEYFBB_20190422.csv')
+dbfolder_FBB = '../FBB_bl/'
+lst_FBB=list(df_FBB.RID)
+a=str(lst_FBB)
+a=a.lstrip('[]')
+a= a.replace("]","")
+lst_FBB=a.split(', ')
+FBBSUV= np.asarray(df_FBB.loc[:,['FRONTAL','CINGULATE','PARIETAL','TEMPORAL']], dtype='float32') \
+            /np.transpose(np.tile(np.asarray(df_FBB.loc[:,'WHOLECEREBELLUM'], dtype='float32'), (4,1)))
+#testSUV= np.asarray(df_test.SUMMARYSUVR_COMPOSITE_REFNORM, dtype="float32")
+DX_bl_FBB= np.asarray(df_FBB.loc[:,['DX_bl']], dtype='str') 
+imdb_FBB = get_FBB_dataset(lst_FBB,dbfolder_FBB)
+imarr_FBB = np.asarray(imdb_FBB)
+imarr_FBB = np.expand_dims(imarr_FBB, axis=-1)
+
+## Modeling##
+model = Sequential()
+model.add(Conv3D(32, (3,3,3),
+            padding="same",
+            activation="relu",
+            strides= (2,2,2),
+            input_shape=(targetshape[0],targetshape[1],targetshape[2],1)))
+model.add(MaxPooling3D((2,2,2), strides=(2,2,2))) 
+model.add(Conv3D(32, (3,3,3),
+            padding="same",
+            activation="relu") )
+model.add(MaxPooling3D((2,2,2), strides=(2,2,2))) 
+model.add(Conv3D(32, (3,3,3),
+            padding="same",
+            activation="relu") )
+model.add(MaxPooling3D((2,2,2), strides=(2,2,2))) 
+model.add(Conv3D(128, (5,5,5),
+                padding="same",
+                activation="relu")) 
+model.add(Flatten())
+model.add(Dense(128,activation='relu'))
+model.add(Dropout(0.5))
+model.add(Dense(128,activation='relu'))
+model.add(Dropout(0.5))
+model.add(Dense(4))
+
+
+X_train, x_test, Y_train, y_test = train_test_split(imarr, targetSUV, test_size=0.1,random_state=0)
+
+
+#Parameters
+#batch_size=4
+#num_epoch=100
+#opt1=Adam(lr=5e-4)
+#model.compile(loss='mae', optimizer=opt1,
+#              metrics=['mae','mean_absolute_percentage_error'])
+
+#print('Train...')
+#h= model.fit(X_train, Y_train, batch_size=batch_size, epochs=num_epoch,
+#            validation_data=(x_test, y_test))
+
+
+model.load_weights('../model/190531_model.h5')    
+
+##Using Random Rotation
+#for ep in range(num_epoch):
+#    imarr_new = augmentation_randomly_rotate(X_train)
+#    print("randomly roation: done")
+#    print("Epochs:", ep+1)
+#    h= model.fit(imarr_new, Y_train, batch_size=batch_size, epochs=1,
+#             validation_data=(x_test, y_test))
+
+#h= model.fit(imarr_new, Y_train, batch_size=batch_size, nb_epoch=num_epoch,
+#          validation_data=(x_test, y_test))
+
+#  "Accuracy"
+#plt.plot(h.history['mean_absolute_error']) 
+#plt.plot(h.history['val_mean_absolute_error'])
+#plt.title('model error')
+#plt.ylabel('error')
+#plt.xlabel('epoch')
+#plt.legend(['train', 'validation'], loc='upper left')
+#plt.show() 
+
+
+predtrainSUV=model.predict(imarr) 
+predSUV=model.predict(imarr_test) 
+predFBBSUV=model.predict(imarr_FBB) 
+
+targetcompositeSUV=np.mean(targetSUV,axis=1) 
+predcompositetrainSUV=np.mean(predtrainSUV, axis=1)
+testcompositeSUV=np.mean(testSUV,axis=1)
+predcompositeSUV=np.mean(predSUV,axis=1)
+FBBcompositeSUV=np.mean(FBBSUV, axis=1)
+predcompositeFBBSUV=np.mean(predFBBSUV, axis=1) 
+
+mae_train=mean_absolute_error(targetSUV, predtrainSUV)
+mae_test=mean_absolute_error(testSUV, predSUV)
+mae_FBB=mean_absolute_error(FBBSUV, predFBBSUV)
+
+mae_train=mean_absolute_error(targetSUV, predtrainSUV)
+mae_train_frontal=mean_absolute_error(targetSUV[:,0], predtrainSUV[:,0])
+mae_train_cingulate=mean_absolute_error(targetSUV[:,1], predtrainSUV[:,1])
+mae_train_parietal=mean_absolute_error(targetSUV[:,2], predtrainSUV[:,2])
+mae_train_temporal=mean_absolute_error(targetSUV[:,3], predtrainSUV[:,3])
+mae_train1=mean_absolute_error(targetcompositeSUV, predcompositetrainSUV)
+
+mae_test=mean_absolute_error(testSUV, predSUV)
+mae_test_frontal=mean_absolute_error(testSUV[:,0], predSUV[:,0])
+mae_test_cingulate=mean_absolute_error(testSUV[:,1], predSUV[:,1])
+mae_test_parietal=mean_absolute_error(testSUV[:,2], predSUV[:,2])
+mae_test_temporal=mean_absolute_error(testSUV[:,3], predSUV[:,3])
+mae_test1=mean_absolute_error(testcompositeSUV, predcompositeSUV)
+
+mae_FBB=mean_absolute_error(FBBSUV, predFBBSUV)
+mae_FBB_frontal=mean_absolute_error(FBBSUV[:,0], predFBBSUV[:,0])
+mae_FBB_cingulate=mean_absolute_error(FBBSUV[:,1], predFBBSUV[:,1])
+mae_FBB_parietal=mean_absolute_error(FBBSUV[:,2], predFBBSUV[:,2])
+mae_FBB_temporal=mean_absolute_error(FBBSUV[:,3], predFBBSUV[:,3])
+mae_FBB1=mean_absolute_error(FBBcompositeSUV, predcompositeFBBSUV)    
+    
+#test set for florbetapir   
+for c in range (4):  
+    plt.figure(figsize=(10,10))  
+#    plt.xlim([0.75, 2.15])
+#    plt.ylim([0.75, 1.9])
+    plt.xlabel('MR-based SUVR', fontsize=27)
+    plt.ylabel('Deep learning-based SUVR', fontsize=27)   
+#    plt.legend()
+    slope, intercept, r_value, p_value, stderr = stats.linregress(testSUV[0:,c],predSUV[0:,c])
+    ry = polyval([slope, intercept], testSUV)
+    plt.plot(testSUV, ry, color='gray', linestyle='--')
+    for i in range (366):    
+        #plt.label(['CN','MCI','AD'], loc='lower right')
+        if 'CN' in DX_bl_test[i]:
+            plt.plot(testSUV[i,c], predSUV[i,c], 'or', label='CN', alpha=0.6)   
+        else: 
+            if 'MCI' in DX_bl_test[i]: 
+                plt.plot(testSUV[i,c], predSUV[i,c],'oc', label='MCI', alpha=0.3)  
+            else: 
+                if 'AD' in DX_bl_test[i]: 
+                    plt.plot(testSUV[i,c], predSUV[i,c],'ob', label='AD', alpha=1) 
+                else: print('end')
+ 
+
+#test set for florbetaben
+for c in range (4):  
+    plt.figure(figsize=(10,10))  
+#    plt.xlim([0.75, 2.15])
+#    plt.ylim([0.75, 1.9])
+    plt.xlabel('MR-based SUVR', fontsize=27)
+    plt.ylabel('Deep learning-based SUVR', fontsize=27)    
+    slope, intercept, r_value, p_value, stderr = stats.linregress(FBBSUV[0:,c],predFBBSUV[0:,c])
+    ry = polyval([slope, intercept], FBBSUV)     
+    plt.plot(FBBSUV, ry, color='gray', linestyle='-.')
+    #plt.legend(['CN','MCI','AD'], loc='lower right') 
+    for i in range (89):    
+        if 'CN' in DX_bl_FBB[i]:
+            plt.plot(FBBSUV[i,c], predFBBSUV[i,c], 'or', label="CN",alpha=0.6) 
+        else: 
+            if 'MCI' in DX_bl_FBB[i]: 
+                plt.plot(FBBSUV[i,c], predFBBSUV[i,c],'oc', label="MCI", alpha=0.3)   
+            else: 
+                if 'AD' in DX_bl_FBB[i]: 
+                    plt.plot(FBBSUV[i,c], predFBBSUV[i,c],'ob', label="AD", alpha=1) 
+                else: print('end')  
+    
+
+#test set for florbetapir            
+def bland_altman_plot(testSUV, predSUV):
+    testSUV     = np.asarray(testSUV)
+    predSUV     = np.asarray(predSUV)
+    return testSUV, predSUV
+mean      = np.mean([testSUV, predSUV],axis=0)
+diff      = testSUV - predSUV                   # Difference between data1 and data2
+md        = np.mean(diff)                   # Mean of the difference
+sd        = np.std(diff)
+
+for c in range (4):  
+    plt.figure(figsize=(10,7))
+    plt.scatter(mean[:,c], diff[:,c], alpha = 0.3)
+    plt.xlabel('Mean of both methods', fontsize=22) 
+    plt.ylabel('Difference between both methods', fontsize=22) 
+    plt.axhline(md,           color='gray', linestyle='--')
+    plt.axhline(md + 1.96*sd, color='gray', linestyle='--')
+    plt.axhline(md - 1.96*sd, color='gray', linestyle='--')
+else:('end')  
+    
+
+#test set for florbetaben
+def bland_altman_plot(FBBSUV, predFBBSUV):
+    FBBSUV     = np.asarray(FBBSUV)
+    predFBBSUV     = np.asarray(predFBBSUV) 
+    return FBBSUV,predFBBSUV
+mean_FBB      = np.mean([FBBSUV, predFBBSUV],axis=0)
+diff_FBB      = FBBSUV - predFBBSUV                   # Difference between data1 and data2
+md_FBB        = np.mean(diff)                   # Mean of the difference
+sd_FBB        = np.std(diff)            # Standard deviation of the difference
+
+for c in range (4):  
+    plt.figure(figsize=(10,7))
+    plt.scatter(mean_FBB[:,c], diff_FBB[:,c], alpha = 0.3)
+    plt.xlabel('Mean of both methods', fontsize=22) 
+    plt.ylabel('Difference between both methods', fontsize=22) 
+    plt.axhline(md,           color='gray', linestyle='--')
+    plt.axhline(md + 1.96*sd, color='gray', linestyle='--')
+    plt.axhline(md - 1.96*sd, color='gray', linestyle='--')
+else:('end')  
+
+# threshold = 1.11
+Posi_predSUV = (predcompositeSUV >= 1.11).astype('int')
+Posi_testSUV = (testcompositeSUV >= 1.11).astype('int')
+def find_TP_test(Posi_testSUV, Posi_predSUV):
+    # counts the number of true positives (Posi_testSUV = 1, Posi_predSUV = 1)
+    return sum((Posi_testSUV == 1) & (Posi_predSUV == 1))
+def find_FN_test(Posi_testSUV, Posi_predSUV):
+    # counts the number of false negatives (y_true = 1, y_pred = 0)
+    return sum((Posi_testSUV == 1) & (Posi_predSUV == 0))
+def find_FP_test(Posi_testSUV, Posi_predSUV):
+    # counts the number of false positives (y_true = 0, y_pred = 1)
+    return sum((Posi_testSUV == 0) & (Posi_predSUV == 1))
+def find_TN_test(Posi_testSUV, Posi_predSUV):
+    # counts the number of true negatives (y_true = 0, y_pred = 0)
+    return sum((Posi_testSUV == 0) & (Posi_predSUV == 0))
+
+#print('TP:',find_TP(Posi_testSUV, Posi_predSUV))
+#print('FN:',find_FN(Posi_testSUV, Posi_predSUV))
+#print('FP:',find_FP(Posi_testSUV, Posi_predSUV))
+#print('TN:',find_TN(Posi_testSUV, Posi_predSUV))
+
+
+# 2X2 table: 
+def find_conf_matrix_values(Posi_testSUV,Posi_predSUV):
+    # calculate TP, FN, FP, TN
+    TP_test = find_TP(Posi_testSUV,Posi_predSUV)
+    FN_test = find_FN(Posi_testSUV,Posi_predSUV)
+    FP_test = find_FP(Posi_testSUV,Posi_predSUV)
+    TN_test = find_TN(Posi_testSUV,Posi_predSUV)
+    return TP_test,FN_test,FP_test,TN_test
+def my_confusion_matrix(Posi_testSUV,Posi_predSUV):
+    TP_test,FN_test,FP_test,TN_test = find_conf_matrix_values(Posi_testSUV,Posi_predSUV)
+    return np.array([[TP_test,FN_test],[FP_test,TN_test]])
+my_confusion_matrix(Posi_testSUV, Posi_predSUV)
+ 
+TrP_test=sum((Posi_testSUV == 1) & (Posi_predSUV == 1))
+FaN_test=sum((Posi_testSUV == 1) & (Posi_predSUV == 0))
+FaP_test=sum((Posi_testSUV == 0) & (Posi_predSUV == 1))
+TrN_test=sum((Posi_testSUV == 0) & (Posi_predSUV == 0))
+
+Accuracy_test=(TrP_test+TrN_test)/(TrP_test+TrN_test+FaP_test+FaN_test)
+Sensitivity_test=(TrP_test)/(TrP+FaN_test)
+Specificity_test=TrN_test/(TrN_test+FaP_test)
+
+# threshold = 1.1
+Posi_FBBSUV = (FBBcompositeSUV >= 1.11).astype('int')
+Posi_predFBBSUV = (predcompositeFBBSUV >= 1.11).astype('int')
+def find_TP_FBB(Posi_FBBSUV, Posi_predFBBSUV):
+     #counts the number of true positives (Posi_testSUV = 1, Posi_predFBBSUV = 1)
+    return sum((Posi_FBBSUV == 1) & (Posi_predFBBSUV == 1))
+def find_FN_FBB(Posi_FBBSUV, Posi_predFBBSUV):
+ #    counts the number of false negatives (y_true = 1, y_pred = 0)
+    return sum((Posi_FBBSUV == 1) & (Posi_predFBBSUV == 0))
+def find_FP_FBB(Posi_FBBSUV, Posi_predFBBSUV):
+#     counts the number of false positives (y_true = 0, y_pred = 1)
+    return sum((Posi_FBBSUV == 0) & (Posi_predFBBSUV == 1))
+def find_TN_FBB(Posi_FBBSUV, Posi_predFBBSUV):
+     #counts the number of true negatives (y_true = 0, y_pred = 0)
+    return sum((Posi_FBBSUV == 0) & (Posi_predFBBSUV == 0))
+
+#print('TP:',find_TP(Posi_testSUV, Posi_predFBBSUV))
+#print('FN:',find_FN(Posi_testSUV, Posi_predFBBSUV))
+#print('FP:',find_FP(Posi_testSUV, Posi_predFBBSUV))
+#print('TN:',find_TN(Posi_testSUV, Posi_predFBBSUV))
+
+# 2X2 table: 
+def find_conf_matrix_values(Posi_FBBSUV,Posi_predFBBSUV):
+    # calculate TP, FN, FP, TN
+    TP_FBB = find_TP(Posi_FBBSUV,Posi_predFBBSUV)  
+    FN_FBB = find_FN(Posi_FBBSUV,Posi_predFBBSUV)
+    FP_FBB = find_FP(Posi_FBBSUV,Posi_predFBBSUV)
+    TN_FBB = find_TN(Posi_FBBSUV,Posi_predFBBSUV)
+    return TP_FBB,FN_FBB,FP_FBB,TN_FBB
+def my_confusion_matrix(Posi_FBBSUV,Posi_predFBBSUV):
+    TP_FBB,FN_FBB,FP_FBB,TN_FBB = find_conf_matrix_values(Posi_FBBSUV,Posi_predFBBSUV)
+    return np.array([[TP_FBB,FN_FBB],[FP_FBB,TN_FBB]])
+
+# my_confusion_matrix(Posi_FBBSUV[0:,1], Posi_predFBBSUV[0:,1]) 
+
+    
+TrP_FBB=sum((Posi_FBBSUV == 1) & (Posi_predFBBSUV == 1))
+FaN_FBB=sum((Posi_FBBSUV == 1) & (Posi_predFBBSUV == 0))
+FaP_FBB=sum((Posi_FBBSUV == 0) & (Posi_predFBBSUV == 1))
+TrN_FBB=sum((Posi_FBBSUV == 0) & (Posi_predFBBSUV == 0))
+
+
+Accuracy_FBB=(TrP_FBB+TrN_FBB)/(TrP_FBB+TrN_FBB+FaP_FBB+FaN_FBB)
+Sensitivity_FBB=(TrP_FBB)/(TrP_FBB+FaN_FBB)
+Specificity_FBB=TrN_FBB/(TrN_FBB+FaP_FBB)
+
+Posi_predtrainSUV = (predcompositetrainSUV >= 1.11).astype('int')
+Posi_trainSUV = (targetcompositeSUV >= 1.11).astype('int')
+
+kappa_train= cohen_kappa_score(Posi_trainSUV,Posi_predtrainSUV)
+kappa_test= cohen_kappa_score(Posi_testSUV,Posi_predSUV)
+kappa_FBB= cohen_kappa_score(Posi_FBBSUV,Posi_predFBBSUV)
+
+r_train=stats.pearsonr(targetcompositeSUV, predcompositetrainSUV)
+r_train_frontal=stats.pearsonr(targetSUV[:,0], predtrainSUV[:,0])
+r_train_cingulate=stats.pearsonr(targetSUV[:,1], predtrainSUV[:,1])
+r_train_parietal=stats.pearsonr(targetSUV[:,2], predtrainSUV[:,2])
+r_train_temporal=stats.pearsonr(targetSUV[:,3], predtrainSUV[:,3])
+
+r_test=stats.pearsonr(testcompositeSUV, predcompositeSUV)
+r_test_frontal=stats.pearsonr(testSUV[:,0], predSUV[:,0])
+r_test_cingulate=stats.pearsonr(testSUV[:,1], predSUV[:,1])
+r_test_parietal=stats.pearsonr(testSUV[:,2], predSUV[:,2])
+r_test_temporal=stats.pearsonr(testSUV[:,3], predSUV[:,3])
+
+r_FBB_test=stats.pearsonr(FBBcompositeSUV, predcompositeFBBSUV)
+r_FBB_frontal=stats.pearsonr(FBBSUV[:,0], predFBBSUV[:,0])
+r_FBB_cingulate=stats.pearsonr(FBBSUV[:,1], predFBBSUV[:,1])
+r_FBB_parietal=stats.pearsonr(FBBSUV[:,2], predFBBSUV[:,2])
+r_FBB_temporal=stats.pearsonr(FBBSUV[:,3], predFBBSUV[:,3])
+
+#plt.subplot(1,2,1)
+#Train_No= 0 # Train_no 0-850
+#plt.imshow(imarr[Train_No,:,:,25,0])
+#a=targetSUV[Train_No]>=1.1
+#if True in a :
+#    plt.title('Positive')
+#else :
+#    plt.title('Negative')
+
+
+#For test sample
+#Test_No=366 # Train_no 0-366
+#print(testSUV[Test_No])
+#plt.subplot(1,2,1)
+#plt.imshow(imarr_test[Test_No,:,:,30,0])
+#b=testSUV[Test_No]>=1.1
+#if True in b :
+#    plt.title('Positive'+'..'+ str(max(testSUV[Test_No])))
+#else :
+#plt.title('Negative'+'..'+ str(max(testSUV[Test_No])))
+
+#predSUV=model.predict(imarr_test)
+#plt.scatter(predSUV, testSUV)
